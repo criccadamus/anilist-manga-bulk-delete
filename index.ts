@@ -58,7 +58,10 @@ interface DeleteMediaListEntryResponse {
   errors?: unknown[];
 }
 
-async function getMangaList(accessToken: string, username: string): Promise<MediaList[]> {
+async function getMangaList(
+  accessToken: string,
+  username: string,
+): Promise<MediaList[]> {
   const query = `
     query ($username: String, $type: MediaType) {
       MediaListCollection(userName: $username, type: $type) {
@@ -100,7 +103,7 @@ async function getMangaList(accessToken: string, username: string): Promise<Medi
     process.exit(1);
   }
 
-  const data = await response.json() as MediaListCollectionResponse;
+  const data = (await response.json()) as MediaListCollectionResponse;
 
   if (data.errors) {
     error(`GraphQL errors: ${JSON.stringify(data.errors)}`);
@@ -115,7 +118,10 @@ async function getMangaList(accessToken: string, username: string): Promise<Medi
   return data.data.MediaListCollection.lists;
 }
 
-async function deleteEntry(accessToken: string, entryId: number): Promise<boolean> {
+async function deleteEntry(
+  accessToken: string,
+  entryId: number,
+): Promise<boolean> {
   const mutation = `
     mutation ($id: Int) {
       DeleteMediaListEntry(id: $id) {
@@ -161,10 +167,12 @@ async function deleteEntry(accessToken: string, entryId: number): Promise<boolea
     return false;
   }
 
-  const data = await response.json() as DeleteMediaListEntryResponse;
+  const data = (await response.json()) as DeleteMediaListEntryResponse;
 
   if (data.errors) {
-    error(`GraphQL errors for entry ${entryId}: ${JSON.stringify(data.errors)}`);
+    error(
+      `GraphQL errors for entry ${entryId}: ${JSON.stringify(data.errors)}`,
+    );
     return false;
   }
 
@@ -234,13 +242,21 @@ If no parameters are provided, the script will automatically use values from ${Y
   }
 
   if (!accessToken || !username) {
-    console.log(`Usage: ${BLUE}bun${NC} index.ts ${YELLOW}[ACCESS_TOKEN]${NC} ${YELLOW}[USERNAME]${NC}`);
+    console.log(
+      `Usage: ${BLUE}bun${NC} index.ts ${YELLOW}[ACCESS_TOKEN]${NC} ${YELLOW}[USERNAME]${NC}`,
+    );
     console.log(`       ${BLUE}bun${NC} index.ts ${GREEN}--help${NC}`);
-    console.log(`\nIf no parameters are provided, the script will use values from ${YELLOW}.env${NC} file`);
-    console.log("or shell profile environment variables (e.g., ~/.zshrc, ~/.bashrc):");
+    console.log(
+      `\nIf no parameters are provided, the script will use values from ${YELLOW}.env${NC} file`,
+    );
+    console.log(
+      "or shell profile environment variables (e.g., ~/.zshrc, ~/.bashrc):",
+    );
     console.log(`  ${YELLOW}ACCESS_TOKEN${NC}=your_token_here`);
     console.log(`  ${YELLOW}USERNAME${NC}=your_username_here`);
-    console.log(`\nSee ${BLUE}README.md${NC} for full instructions on how to get your access token.`);
+    console.log(
+      `\nSee ${BLUE}README.md${NC} for full instructions on how to get your access token.`,
+    );
     process.exit(1);
   }
 
@@ -264,7 +280,9 @@ If no parameters are provided, the script will automatically use values from ${Y
   info(`Total manga entries to delete: ${totalEntries}`);
 
   // Confirm deletion
-  const confirmed = await confirm(`\n${YELLOW}Are you sure you want to delete ALL manga entries?${NC} ${BLUE}(yes/no)${NC}: `);
+  const confirmed = await confirm(
+    `\n${YELLOW}Are you sure you want to delete ALL manga entries?${NC} ${BLUE}(yes/no)${NC}: `,
+  );
 
   if (!confirmed) {
     warning("Deletion cancelled.");
@@ -279,9 +297,12 @@ If no parameters are provided, the script will automatically use values from ${Y
   let index = 1;
   for (const entry of allEntries) {
     const entryId = entry.id;
-    const title = entry.media.title.romaji || entry.media.title.english || "Unknown";
+    const title =
+      entry.media.title.romaji || entry.media.title.english || "Unknown";
 
-    process.stdout.write(`[${index++}/${totalEntries}] Deleting: ${title} (ID: ${entryId})... `);
+    process.stdout.write(
+      `[${index++}/${totalEntries}] Deleting: ${title} (ID: ${entryId})... `,
+    );
 
     if (await deleteEntry(accessToken, entryId)) {
       deletedCount++;

@@ -1,6 +1,6 @@
-# AniList Bulk Manga Deleter
+# Anilist Bulk Manga Deleter
 
-Simple scripts to delete all manga entries from your AniList account while leaving anime entries untouched.
+Simple scripts to delete all manga entries from your Anilist account while leaving anime entries untouched.
 
 ## Prerequisites
 
@@ -8,7 +8,7 @@ Simple scripts to delete all manga entries from your AniList account while leavi
 
 ## Getting Your AniList Access Token
 
-To use this script, you need to obtain an access token from AniList:
+To use this script, you need to obtain an access token from Anilist:
 
 1. Go to https://anilist.co/settings/developer
 2. Create a new API client:
