@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
- * AniList Manga Bulk Deleter (Bun/TypeScript version)
- * Deletes all manga entries from your AniList account.
+ * Anilist Manga Bulk Deleter (Bun/TypeScript version)
+ * Deletes all manga entries from your Anilist account.
  * Does NOT touch anime entries.
  */
 
@@ -197,17 +197,17 @@ async function confirm(message: string): Promise<boolean> {
 async function main() {
   if (process.argv[2] === "--help" || process.argv[2] === "-h") {
     console.log(`
-${BLUE}#${NC} AniList Bulk Manga Deleter
+${BLUE}#${NC} Anilist Bulk Manga Deleter
 
-Simple scripts to delete all manga entries from your AniList account while leaving anime entries untouched.
+Simple scripts to delete all manga entries from your Anilist account while leaving anime entries untouched.
 
 ${YELLOW}## Prerequisites${NC}
 
 - Bun runtime installed (https://bun.sh/)
 
-${YELLOW}## Getting Your AniList Access Token${NC}
+${YELLOW}## Getting Your Anilist Access Token${NC}
 
-To use this script, you need to obtain an access token from AniList:
+To use this script, you need to obtain an access token from Anilist:
 
 1. Go to https://anilist.co/settings/developer
 2. Create a new API client:
@@ -312,7 +312,7 @@ If no parameters are provided, the script will automatically use values from ${Y
       console.log(`${RED}✗${NC}`);
     }
 
-    // Rate limiting: AniList currently has 30 requests/min limit (degraded state)
+    // Rate limiting: Anilist currently has 30 requests/min limit (degraded state)
     // 2.5s delay = ~24 requests/min to stay safely under limit
     await sleep(2500);
   }

@@ -6,7 +6,7 @@ Simple scripts to delete all manga entries from your Anilist account while leavi
 
 - [Bun](https://bun.sh/) runtime installed
 
-## Getting Your AniList Access Token
+## Getting Your Anilist Access Token
 
 To use this script, you need to obtain an access token from Anilist:
 

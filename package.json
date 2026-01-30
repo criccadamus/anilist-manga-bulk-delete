@@ -2,7 +2,7 @@
   "name": "anilist-bulk-editor",
   "version": "0.1.0",
   "private": true,
-  "description": "Delete all manga entries from your AniList account",
+  "description": "Delete all manga entries from your Anilist account",
   "keywords": [
     "anilist",
     "bulk-delete",
