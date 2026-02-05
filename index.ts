@@ -5,6 +5,9 @@
  * Does NOT touch anime entries.
  */
 
+import { argv, env, exit, stderr, stdin, stdout } from "node:process";
+import { createInterface } from "node:readline/promises";
+
 const API_URL = "https://graphql.anilist.co";
 
 // Colors for output
@@ -14,11 +17,51 @@ const YELLOW = "\x1b[1;33m";
 const BLUE = "\x1b[0;34m";
 const NC = "\x1b[0m";
 
+const HELP_TEXT = `
+${BLUE}#${NC} Anilist Bulk Manga Deleter
+
+Simple scripts to delete all manga entries from your Anilist account while leaving anime entries untouched.
+
+${YELLOW}## Prerequisites${NC}
+
+- Bun runtime installed (https://bun.sh/)
+
+${YELLOW}## Getting Your Anilist Access Token${NC}
+
+To use this script, you need to obtain an access token from Anilist:
+
+1. Go to https://anilist.co/settings/developer
+2. Create a new API client:
+    - Name: Give it any name (e.g., "Manga Bulk Deleter")
+    - Redirect URI: https://anilist.co/api/v2/oauth/pin
+3. Click "Save"
+4. Copy your Client ID
+5. Open this URL in your browser (replace YOUR_CLIENT_ID with your actual Client ID):
+    https://anilist.co/api/v2/oauth/authorize?client_id=YOUR_CLIENT_ID&response_type=token
+6. Authorize the application
+7. You'll be redirected to a page with your access token in the URL
+8. Copy the access token (it's the long string after access_token=)
+
+${YELLOW}## Usage${NC}
+
+${GREEN}bun${NC} index.ts ${YELLOW}[ACCESS_TOKEN]${NC} ${YELLOW}[USERNAME]${NC}
+
+If no parameters are provided, the script will automatically use values from ${YELLOW}.env${NC} file or shell profile environment variables (e.g., ~/.zshrc, ~/.bashrc).
+`;
+
+function writeln(message: string): void {
+  stdout.write(String(message));
+}
+
+function writeErrorLine(message: string): void {
+  stderr.write(String(message));
+}
+
 // Logging functions
-const info = (msg: string) => console.log(`${BLUE}❖${NC} ${msg}`);
-const success = (msg: string) => console.log(`${GREEN}✓${NC} ${msg}`);
-const warning = (msg: string) => console.log(`${YELLOW}⚠${NC} ${msg}`);
-const error = (msg: string) => console.error(`${RED}✗${NC} ${msg}`);
+const info = (msg: string) => writeln(`${BLUE}❖${NC} ${msg}`);
+const success = (msg: string) => writeln(`${GREEN}✓${NC} ${msg}`);
+const warning = (msg: string) => writeln(`${YELLOW}⚠${NC} ${msg}`);
+const error = (msg: string) => writeErrorLine(`${RED}✗${NC} ${msg}`);
 
 interface MediaTitle {
   romaji: string | null;
@@ -100,19 +143,19 @@ async function getMangaList(
   if (!response.ok) {
     error(`Error fetching manga list: ${response.status}`);
     error(await response.text());
-    process.exit(1);
+    exit(1);
   }
 
   const data = (await response.json()) as MediaListCollectionResponse;
 
   if (data.errors) {
     error(`GraphQL errors: ${JSON.stringify(data.errors)}`);
-    process.exit(1);
+    exit(1);
   }
 
   if (!data.data?.MediaListCollection) {
     error("No data returned from API");
-    process.exit(1);
+    exit(1);
   }
 
   return data.data.MediaListCollection.lists;
@@ -184,132 +227,87 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function confirm(message: string): Promise<boolean> {
-  process.stdout.write(`${message} `);
-
-  for await (const line of process.stdin) {
-    const answer = line.toString().trim().toLowerCase();
-    return answer === "yes";
-  }
-
-  return false;
+  const reader = createInterface({
+    input: stdin,
+    output: stdout,
+  });
+  const answer = (await reader.question(message)).trim().toLowerCase();
+  reader.close();
+  return answer === "yes";
 }
 
-async function main() {
-  if (process.argv[2] === "--help" || process.argv[2] === "-h") {
-    console.log(`
-${BLUE}#${NC} Anilist Bulk Manga Deleter
+function showHelp(): void {
+  writeln(HELP_TEXT);
+  exit(0);
+}
 
-Simple scripts to delete all manga entries from your Anilist account while leaving anime entries untouched.
+function showUsageAndExit(): never {
+  writeln(
+    `Usage: ${BLUE}bun${NC} index.ts ${YELLOW}[ACCESS_TOKEN]${NC} ${YELLOW}[USERNAME]${NC}`,
+  );
+  writeln(`       ${BLUE}bun${NC} index.ts ${GREEN}--help${NC}`);
+  writeln(
+    `\nIf no parameters are provided, the script will use values from ${YELLOW}.env${NC} file`,
+  );
+  writeln(
+    "or shell profile environment variables (e.g., ~/.zshrc, ~/.bashrc):",
+  );
+  writeln(`  ${YELLOW}ACCESS_TOKEN${NC}=your_token_here`);
+  writeln(`  ${YELLOW}USERNAME${NC}=your_username_here`);
+  writeln(
+    `\nSee ${BLUE}README.md${NC} for full instructions on how to get your access token.`,
+  );
+  exit(1);
+}
 
-${YELLOW}## Prerequisites${NC}
-
-- Bun runtime installed (https://bun.sh/)
-
-${YELLOW}## Getting Your Anilist Access Token${NC}
-
-To use this script, you need to obtain an access token from Anilist:
-
-1. Go to https://anilist.co/settings/developer
-2. Create a new API client:
-    - Name: Give it any name (e.g., "Manga Bulk Deleter")
-    - Redirect URI: https://anilist.co/api/v2/oauth/pin
-3. Click "Save"
-4. Copy your Client ID
-5. Open this URL in your browser (replace YOUR_CLIENT_ID with your actual Client ID):
-    https://anilist.co/api/v2/oauth/authorize?client_id=YOUR_CLIENT_ID&response_type=token
-6. Authorize the application
-7. You'll be redirected to a page with your access token in the URL
-8. Copy the access token (it's the long string after access_token=)
-
-${YELLOW}## Usage${NC}
-
-${GREEN}bun${NC} index.ts ${YELLOW}[ACCESS_TOKEN]${NC} ${YELLOW}[USERNAME]${NC}
-
-If no parameters are provided, the script will automatically use values from ${YELLOW}.env${NC} file or shell profile environment variables (e.g., ~/.zshrc, ~/.bashrc).
-`);
-    process.exit(0);
-  }
-
-  let accessToken = process.argv[2];
-  let username = process.argv[3];
-
-  if (!accessToken) {
-    accessToken = process.env.ACCESS_TOKEN;
-  }
-
-  if (!username) {
-    username = process.env.USERNAME;
-  }
+function getCredentials(args: string[]): {
+  accessToken: string;
+  username: string;
+} {
+  const accessToken = args[0] ?? env.ACCESS_TOKEN;
+  const username = args[1] ?? env.USERNAME;
 
   if (!accessToken || !username) {
-    console.log(
-      `Usage: ${BLUE}bun${NC} index.ts ${YELLOW}[ACCESS_TOKEN]${NC} ${YELLOW}[USERNAME]${NC}`,
-    );
-    console.log(`       ${BLUE}bun${NC} index.ts ${GREEN}--help${NC}`);
-    console.log(
-      `\nIf no parameters are provided, the script will use values from ${YELLOW}.env${NC} file`,
-    );
-    console.log(
-      "or shell profile environment variables (e.g., ~/.zshrc, ~/.bashrc):",
-    );
-    console.log(`  ${YELLOW}ACCESS_TOKEN${NC}=your_token_here`);
-    console.log(`  ${YELLOW}USERNAME${NC}=your_username_here`);
-    console.log(
-      `\nSee ${BLUE}README.md${NC} for full instructions on how to get your access token.`,
-    );
-    process.exit(1);
+    showUsageAndExit();
   }
 
-  info(`Fetching manga list for user: ${username}`);
-  const lists = await getMangaList(accessToken, username);
+  return { accessToken, username };
+}
 
-  // Collect all manga entries
+function collectEntries(lists: MediaList[]): MediaListEntry[] {
   const allEntries: MediaListEntry[] = [];
   for (const list of lists) {
     info(`Found ${list.entries.length} entries in '${list.name}' list`);
     allEntries.push(...list.entries);
   }
+  return allEntries;
+}
 
-  const totalEntries = allEntries.length;
+function getMediaTitle(entry: MediaListEntry): string {
+  return entry.media.title.romaji || entry.media.title.english || "Unknown";
+}
 
-  if (totalEntries === 0) {
-    warning("No manga entries found. Nothing to delete.");
-    return;
-  }
-
-  info(`Total manga entries to delete: ${totalEntries}`);
-
-  // Confirm deletion
-  const confirmed = await confirm(
-    `\n${YELLOW}Are you sure you want to delete ALL manga entries?${NC} ${BLUE}(yes/no)${NC}: `,
-  );
-
-  if (!confirmed) {
-    warning("Deletion cancelled.");
-    return;
-  }
-
-  info("Starting deletion...");
-
+async function deleteEntries(
+  accessToken: string,
+  entries: MediaListEntry[],
+): Promise<{ deletedCount: number; failedCount: number }> {
   let deletedCount = 0;
   let failedCount = 0;
-
   let index = 1;
-  for (const entry of allEntries) {
-    const entryId = entry.id;
-    const title =
-      entry.media.title.romaji || entry.media.title.english || "Unknown";
 
-    process.stdout.write(
-      `[${index++}/${totalEntries}] Deleting: ${title} (ID: ${entryId})... `,
+  for (const entry of entries) {
+    const entryId = entry.id;
+    const title = getMediaTitle(entry);
+    stdout.write(
+      `[${index++}/${entries.length}] Deleting: ${title} (ID: ${entryId})... `,
     );
 
     if (await deleteEntry(accessToken, entryId)) {
       deletedCount++;
-      console.log(`${GREEN}✓${NC}`);
+      writeln(`${GREEN}✓${NC}`);
     } else {
       failedCount++;
-      console.log(`${RED}✗${NC}`);
+      writeln(`${RED}✗${NC}`);
     }
 
     // Rate limiting: Anilist currently has 30 requests/min limit (degraded state)
@@ -317,16 +315,53 @@ If no parameters are provided, the script will automatically use values from ${Y
     await sleep(2500);
   }
 
-  console.log("\n" + "=".repeat(50));
-  success("Deletion complete!");
-  console.log(`Successfully deleted: ${GREEN}${deletedCount}${NC}`);
-  if (failedCount > 0) {
-    console.log(`Failed: ${RED}${failedCount}${NC}`);
-  }
-  console.log("=".repeat(50));
+  return { deletedCount, failedCount };
 }
 
-main().catch((error) => {
-  error(`Fatal error: ${error}`);
-  process.exit(1);
+function printSummary(deletedCount: number, failedCount: number): void {
+  writeln(String("=".repeat(50)));
+  success("Deletion complete!");
+  writeln(`Successfully deleted: ${GREEN}${deletedCount}${NC}`);
+  if (failedCount > 0) {
+    writeln(`Failed: ${RED}${failedCount}${NC}`);
+  }
+  writeln("=".repeat(50));
+}
+
+async function main(): Promise<void> {
+  const args = argv.slice(2);
+  if (args[0] === "--help" || args[0] === "-h") {
+    showHelp();
+  }
+
+  const { accessToken, username } = getCredentials(args);
+  info(`Fetching manga list for user: ${username}`);
+  const lists = await getMangaList(accessToken, username);
+  const allEntries = collectEntries(lists);
+
+  if (allEntries.length === 0) {
+    warning("No manga entries found. Nothing to delete.");
+    return;
+  }
+
+  info(`Total manga entries to delete: ${allEntries.length}`);
+  const confirmed = await confirm(
+    `\n${YELLOW}Are you sure you want to delete ALL manga entries?${NC} ${BLUE}(yes/no)${NC}: `,
+  );
+  if (!confirmed) {
+    warning("Deletion cancelled.");
+    return;
+  }
+
+  info("Starting deletion...");
+  const { deletedCount, failedCount } = await deleteEntries(
+    accessToken,
+    allEntries,
+  );
+  printSummary(deletedCount, failedCount);
+}
+
+main().catch((caught) => {
+  error(`Fatal error: ${String(caught)}`);
+  exit(1);
 });
