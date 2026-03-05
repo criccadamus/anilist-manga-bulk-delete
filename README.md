@@ -1,6 +1,15 @@
 # Anilist Bulk Manga Deleter
 
-Simple scripts to delete all manga entries from your Anilist account while leaving anime entries untouched.
+Deletes all manga entries and manga-related activities from your Anilist account while leaving anime entries and activities untouched.
+
+## What This Script Does
+
+1. **Deletes manga list entries**: Removes all manga from your lists (Reading, Completed, Planned, Dropped, etc.)
+2. **Deletes manga activities**: Removes manga-related posts from your activity feed:
+   - List activities (e.g., "read chapter 5", "completed", "dropped")
+   - Text posts containing manga-related keywords (manga, chapter, volume, read, reading, manhwa, manhua, webtoon, light novel)
+
+**Note**: This script deletes both list entries AND activities. Anime entries and anime-related activities are preserved.
 
 ## Prerequisites
 

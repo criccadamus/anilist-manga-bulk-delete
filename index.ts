@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 /**
  * Anilist Manga Bulk Deleter (Bun/TypeScript version)
- * Deletes all manga entries from your Anilist account.
- * Does NOT touch anime entries.
+ * Deletes all manga entries and manga-related activities from your Anilist account.
+ * Does NOT touch anime entries or anime-related activities.
  */
 
 import { argv, env, exit, stderr, stdin, stdout } from "node:process";
@@ -20,7 +20,7 @@ const NC = "\x1b[0m";
 const HELP_TEXT = `
 ${BLUE}#${NC} Anilist Bulk Manga Deleter
 
-Simple scripts to delete all manga entries from your Anilist account while leaving anime entries untouched.
+Deletes all manga entries and manga-related activities from your Anilist account while leaving anime entries and activities untouched.
 
 ${YELLOW}## Prerequisites${NC}
 
@@ -41,6 +41,13 @@ To use this script, you need to obtain an access token from Anilist:
 6. Authorize the application
 7. You'll be redirected to a page with your access token in the URL
 8. Copy the access token (it's the long string after access_token=)
+
+${YELLOW}## What This Script Does${NC}
+
+1. ${GREEN}Deletes manga list entries${NC}: Removes all manga from your lists (Reading, Completed, Planned, etc.)
+2. ${GREEN}Deletes manga activities${NC}: Removes manga-related posts from your activity feed:
+   - List activities (e.g., "read chapter X", "completed", "dropped")
+   - Text posts containing manga-related keywords (manga, chapter, volume, etc.)
 
 ${YELLOW}## Usage${NC}
 
@@ -95,6 +102,62 @@ interface MediaListCollectionResponse {
 interface DeleteMediaListEntryResponse {
   data?: {
     DeleteMediaListEntry?: {
+      deleted: boolean;
+    };
+  };
+  errors?: unknown[];
+}
+
+interface UserResponse {
+  data?: {
+    User?: {
+      id: number;
+      name: string;
+    };
+  };
+  errors?: unknown[];
+}
+
+interface ListActivity {
+  id: number;
+  type: "MANGA_LIST" | "ANIME_LIST";
+  status: string;
+  progress: string | null;
+  media: {
+    id: number;
+    type: "MANGA" | "ANIME";
+    title: {
+      romaji: string | null;
+      english: string | null;
+    };
+  };
+  createdAt: number;
+}
+
+interface TextActivity {
+  id: number;
+  type: "TEXT";
+  text: string;
+  createdAt: number;
+}
+
+type Activity = ListActivity | TextActivity;
+
+interface ActivitiesResponse {
+  data?: {
+    Page?: {
+      pageInfo: {
+        hasNextPage: boolean;
+      };
+      activities: Activity[];
+    };
+  };
+  errors?: unknown[];
+}
+
+interface DeleteActivityResponse {
+  data?: {
+    DeleteActivity?: {
       deleted: boolean;
     };
   };
@@ -222,6 +285,239 @@ async function deleteEntry(
   return true;
 }
 
+async function getUserId(
+  accessToken: string,
+  username: string,
+): Promise<number> {
+  const query = `
+    query ($name: String) {
+      User(name: $name) {
+        id
+        name
+      }
+    }
+  `;
+
+  const variables = {
+    name: username,
+  };
+
+  const response = await fetch(API_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+
+  if (!response.ok) {
+    error(`Error fetching user ID: ${response.status}`);
+    error(await response.text());
+    exit(1);
+  }
+
+  const data = (await response.json()) as UserResponse;
+
+  if (data.errors || !data.data?.User) {
+    error(`GraphQL errors: ${JSON.stringify(data.errors)}`);
+    exit(1);
+  }
+
+  return data.data.User.id;
+}
+
+async function getMangaActivities(
+  accessToken: string,
+  userId: number,
+): Promise<Activity[]> {
+  const query = `
+    query ($userId: Int, $page: Int) {
+      Page(page: $page, perPage: 50) {
+        pageInfo {
+          hasNextPage
+        }
+        activities(userId: $userId, type_in: [MANGA_LIST, TEXT]) {
+          ... on ListActivity {
+            id
+            type
+            status
+            progress
+            createdAt
+            media {
+              id
+              type
+              title {
+                romaji
+                english
+              }
+            }
+          }
+          ... on TextActivity {
+            id
+            type
+            text
+            createdAt
+          }
+        }
+      }
+    }
+  `;
+
+  const allActivities: Activity[] = [];
+  let page = 1;
+  let hasNextPage = true;
+
+  while (hasNextPage) {
+    const variables = {
+      userId,
+      page,
+    };
+
+    let response = await fetch(API_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ query, variables }),
+    });
+
+    if (response.status === 429) {
+      const retryAfter = response.headers.get("Retry-After");
+      const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
+      warning(`Rate limited. Waiting ${waitTime / 1000}s...`);
+      await sleep(waitTime);
+
+      response = await fetch(API_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ query, variables }),
+      });
+    }
+
+    if (!response.ok) {
+      error(`Error fetching activities on page ${page}: ${response.status}`);
+      error(await response.text());
+      exit(1);
+    }
+
+    const data = (await response.json()) as ActivitiesResponse;
+
+    if (data.errors) {
+      error(`GraphQL errors: ${JSON.stringify(data.errors)}`);
+      exit(1);
+    }
+
+    if (!data.data?.Page) {
+      error("No page data returned from API");
+      exit(1);
+    }
+
+    const pageActivities = data.data.Page.activities;
+    hasNextPage = data.data.Page.pageInfo.hasNextPage;
+
+    for (const activity of pageActivities) {
+      if (activity.type === "MANGA_LIST") {
+        allActivities.push(activity);
+      } else if (activity.type === "TEXT") {
+        const text = activity.text.toLowerCase();
+        const mangaKeywords = [
+          "manga",
+          "chapter",
+          "volume",
+          "read",
+          "reading",
+          "manhwa",
+          "manhua",
+          "webtoon",
+          "light novel",
+          "ln",
+        ];
+        if (mangaKeywords.some((keyword) => text.includes(keyword))) {
+          allActivities.push(activity);
+        }
+      }
+    }
+
+    info(
+      `Fetched page ${page}: ${pageActivities.length} activities (${allActivities.length} manga-related total)`,
+    );
+    page++;
+
+    await sleep(500);
+  }
+
+  return allActivities;
+}
+
+async function deleteActivity(
+  accessToken: string,
+  activityId: number,
+): Promise<boolean> {
+  const mutation = `
+    mutation ($id: Int) {
+      DeleteActivity(id: $id) {
+        deleted
+      }
+    }
+  `;
+
+  const variables = {
+    id: activityId,
+  };
+
+  let response = await fetch(API_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ query: mutation, variables }),
+  });
+
+  if (response.status === 429) {
+    const retryAfter = response.headers.get("Retry-After");
+    const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
+    warning(`Rate limited. Waiting ${waitTime / 1000}s...`);
+    await sleep(waitTime);
+
+    response = await fetch(API_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ query: mutation, variables }),
+    });
+  }
+
+  if (!response.ok) {
+    error(`Error deleting activity ${activityId}: ${response.status}`);
+    error(await response.text());
+    return false;
+  }
+
+  const data = (await response.json()) as DeleteActivityResponse;
+
+  if (data.errors) {
+    error(
+      `GraphQL errors for activity ${activityId}: ${JSON.stringify(data.errors)}`,
+    );
+    return false;
+  }
+
+  return true;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -310,20 +606,69 @@ async function deleteEntries(
       writeln(`${RED}✗${NC}`);
     }
 
-    // Rate limiting: Anilist currently has 30 requests/min limit (degraded state)
-    // 2.5s delay = ~24 requests/min to stay safely under limit
     await sleep(2500);
   }
 
   return { deletedCount, failedCount };
 }
 
-function printSummary(deletedCount: number, failedCount: number): void {
+function getActivityDescription(activity: Activity): string {
+  if (activity.type === "TEXT") {
+    const preview = activity.text.substring(0, 50);
+    return `Text: "${preview}${activity.text.length > 50 ? "..." : ""}"`;
+  } else {
+    const title =
+      activity.media.title.romaji || activity.media.title.english || "Unknown";
+    const status = activity.status || "updated";
+    const progress = activity.progress ? ` ${String(activity.progress)}` : "";
+    return `${title} - ${status}${progress}`;
+  }
+}
+
+async function deleteActivities(
+  accessToken: string,
+  activities: Activity[],
+): Promise<{ deletedCount: number; failedCount: number }> {
+  let deletedCount = 0;
+  let failedCount = 0;
+  let index = 1;
+
+  for (const activity of activities) {
+    const activityId = activity.id;
+    const description = getActivityDescription(activity);
+    stdout.write(
+      `[${index++}/${activities.length}] Deleting activity: ${description} (ID: ${activityId})... `,
+    );
+
+    if (await deleteActivity(accessToken, activityId)) {
+      deletedCount++;
+      writeln(`${GREEN}✓${NC}`);
+    } else {
+      failedCount++;
+      writeln(`${RED}✗${NC}`);
+    }
+
+    await sleep(2500);
+  }
+
+  return { deletedCount, failedCount };
+}
+
+function printSummary(
+  deletedEntries: number,
+  failedEntries: number,
+  deletedActivities: number,
+  failedActivities: number,
+): void {
   writeln(String("=".repeat(50)));
   success("Deletion complete!");
-  writeln(`Successfully deleted: ${GREEN}${deletedCount}${NC}`);
-  if (failedCount > 0) {
-    writeln(`Failed: ${RED}${failedCount}${NC}`);
+  writeln(`List entries deleted: ${GREEN}${deletedEntries}${NC}`);
+  if (failedEntries > 0) {
+    writeln(`List entries failed: ${RED}${failedEntries}${NC}`);
+  }
+  writeln(`Activities deleted: ${GREEN}${deletedActivities}${NC}`);
+  if (failedActivities > 0) {
+    writeln(`Activities failed: ${RED}${failedActivities}${NC}`);
   }
   writeln("=".repeat(50));
 }
@@ -335,30 +680,61 @@ async function main(): Promise<void> {
   }
 
   const { accessToken, username } = getCredentials(args);
+
+  info(`Fetching user ID for: ${username}`);
+  const userId = await getUserId(accessToken, username);
+  success(`User ID: ${userId}`);
+
   info(`Fetching manga list for user: ${username}`);
   const lists = await getMangaList(accessToken, username);
   const allEntries = collectEntries(lists);
 
-  if (allEntries.length === 0) {
-    warning("No manga entries found. Nothing to delete.");
-    return;
+  let deletedEntries = 0;
+  let failedEntries = 0;
+
+  if (allEntries.length > 0) {
+    info(`Total manga entries to delete: ${allEntries.length}`);
+    const confirmedEntries = await confirm(
+      `\n${YELLOW}Are you sure you want to delete ALL manga list entries?${NC} ${BLUE}(yes/no)${NC}: `,
+    );
+    if (!confirmedEntries) {
+      warning("List entry deletion cancelled.");
+    } else {
+      info("Starting list entry deletion...");
+      const result = await deleteEntries(accessToken, allEntries);
+      deletedEntries = result.deletedCount;
+      failedEntries = result.failedCount;
+    }
+  } else {
+    warning("No manga entries found.");
   }
 
-  info(`Total manga entries to delete: ${allEntries.length}`);
-  const confirmed = await confirm(
-    `\n${YELLOW}Are you sure you want to delete ALL manga entries?${NC} ${BLUE}(yes/no)${NC}: `,
-  );
-  if (!confirmed) {
-    warning("Deletion cancelled.");
-    return;
+  info("Fetching manga-related activities...");
+  const activities = await getMangaActivities(accessToken, userId);
+
+  let deletedActivities = 0;
+  let failedActivities = 0;
+
+  if (activities.length > 0) {
+    info(`Total manga-related activities to delete: ${activities.length}`);
+    const confirmedActivities = await confirm(
+      `\n${YELLOW}Are you sure you want to delete ALL manga-related activities?${NC} ${BLUE}(yes/no)${NC}: `,
+    );
+    if (!confirmedActivities) {
+      warning("Activity deletion cancelled.");
+    } else {
+      info("Starting activity deletion...");
+      const result = await deleteActivities(accessToken, activities);
+      deletedActivities = result.deletedCount;
+      failedActivities = result.failedCount;
+    }
+  } else {
+    warning("No manga-related activities found.");
   }
 
-  info("Starting deletion...");
-  const { deletedCount, failedCount } = await deleteEntries(
-    accessToken,
-    allEntries,
-  );
-  printSummary(deletedCount, failedCount);
+  if (allEntries.length > 0 || activities.length > 0) {
+    printSummary(deletedEntries, failedEntries, deletedActivities, failedActivities);
+  }
 }
 
 main().catch((caught) => {
