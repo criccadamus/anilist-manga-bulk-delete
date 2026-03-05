@@ -31,10 +31,10 @@ function setupAbortHandler(): void {
       if (key === "\u001b") {
         if (!shouldAbort) {
           shouldAbort = true;
-          writeln(`\n${CYAN}⏸${NC} Abort requested - finishing current operation, then stopping...\n`);
+          stdout.write(`\n${CYAN}⏸${NC} Abort requested - finishing current operation, then stopping...\n`);
         }
       } else if (key === "\u0003") {
-        writeln(`\n${RED}✗${NC} Force quit\n`);
+        stdout.write(`\n${RED}✗${NC} Force quit\n`);
         exit(1);
       }
     });
@@ -306,6 +306,7 @@ async function deleteEntry(
   if (response.status === 429) {
     const retryAfter = response.headers.get("Retry-After");
     const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
+    stdout.write("\n");
     warning(`Rate limited. Waiting ${waitTime / 1000}s...`);
     await sleep(waitTime);
 
@@ -443,17 +444,18 @@ async function getMangaActivities(
         body: JSON.stringify({ query, variables }),
       });
 
-      if (response.status === 429) {
-        const retryAfter = response.headers.get("Retry-After");
-        const baseWaitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
-        const waitTime = baseWaitTime + retryCount * 30000;
-        warning(
-          `Rate limited. Waiting ${waitTime / 1000}s (retry ${retryCount + 1}/${maxRetries})...`,
-        );
-        await sleep(waitTime);
-        retryCount++;
-        continue;
-      }
+    if (response.status === 429) {
+      const retryAfter = response.headers.get("Retry-After");
+      const baseWaitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
+      const waitTime = baseWaitTime + retryCount * 30000;
+      stdout.write("\n");
+      warning(
+        `Rate limited. Waiting ${waitTime / 1000}s (retry ${retryCount + 1}/${maxRetries})...`,
+      );
+      await sleep(waitTime);
+      retryCount++;
+      continue;
+    }
 
       if (!response.ok) {
         error(`Error fetching activities on page ${page}: ${response.status}`);
@@ -593,12 +595,23 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function confirm(message: string): Promise<boolean> {
+  if (stdin.isTTY) {
+    stdin.setRawMode(false);
+    stdin.pause();
+  }
+  
   const reader = createInterface({
     input: stdin,
     output: stdout,
   });
   const answer = (await reader.question(message)).trim().toLowerCase();
   reader.close();
+  
+  if (stdin.isTTY) {
+    stdin.setRawMode(true);
+    stdin.resume();
+  }
+  
   return answer === "yes";
 }
 
