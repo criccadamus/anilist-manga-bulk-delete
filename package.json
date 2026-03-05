@@ -17,11 +17,11 @@
     "format": "oxfmt"
   },
   "devDependencies": {
-    "@types/bun": "^1.3.8",
-    "@typescript/native-preview": "^7.0.0-dev.20260205.1",
+    "@types/bun": "^1.3.10",
+    "@typescript/native-preview": "^7.0.0-dev.20260305.1",
     "oxfmt": "^0.28.0",
-    "oxlint": "^1.43.0",
-    "oxlint-tsgolint": "^0.11.4",
+    "oxlint": "^1.51.0",
+    "oxlint-tsgolint": "^0.11.5",
     "typescript": "^5.9.3"
   }
 }

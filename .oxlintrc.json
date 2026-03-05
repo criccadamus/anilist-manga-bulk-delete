@@ -1,26 +1,17 @@
 {
   "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
-  "plugins": [
-    "eslint",
-    "react",
-    "typescript",
-    "unicorn",
-    "oxc",
-    "import",
-    "promise"
-  ],
+  "plugins": ["eslint", "typescript", "unicorn", "oxc", "import", "promise"],
   "env": {
-    "browser": true,
-    "es2022": true
+    "node": true,
+    "browser": false,
+    "es2024": true
   },
-  "ignorePatterns": ["worker-configuration.d.ts", "**/*.d.ts"],
   "rules": {
     "typescript/no-explicit-any": "error",
     "typescript/no-unsafe-assignment": "error",
     "typescript/no-unsafe-call": "error",
     "typescript/no-unsafe-member-access": "error",
     "typescript/no-unsafe-return": "error",
-
     "no-unused-vars": [
       "error",
       {
@@ -54,13 +45,7 @@
     "no-iterator": "error",
     "no-labels": "error",
     "no-var": "error",
-    "no-shadow": [
-      "error",
-      {
-        "hoist": "functions",
-        "builtinGlobals": true
-      }
-    ],
+    "no-shadow": ["error"],
     "no-param-reassign": "error",
     "no-extend-native": "error",
     "no-func-assign": "error",
@@ -68,7 +53,6 @@
     "no-extra-bind": "error",
     "no-useless-constructor": "error",
     "no-unused-expressions": "error",
-
     "eqeqeq": [
       "error",
       "always",
