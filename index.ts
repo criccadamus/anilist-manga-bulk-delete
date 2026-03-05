@@ -375,23 +375,12 @@ async function getMangaActivities(
       page,
     };
 
-    let response = await fetch(API_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify({ query, variables }),
-    });
+    const maxRetries = 3;
+    let retryCount = 0;
+    let success = false;
 
-    if (response.status === 429) {
-      const retryAfter = response.headers.get("Retry-After");
-      const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
-      warning(`Rate limited. Waiting ${waitTime / 1000}s...`);
-      await sleep(waitTime);
-
-      response = await fetch(API_URL, {
+    while (retryCount < maxRetries && !success) {
+      const response = await fetch(API_URL, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -400,58 +389,78 @@ async function getMangaActivities(
         },
         body: JSON.stringify({ query, variables }),
       });
-    }
 
-    if (!response.ok) {
-      error(`Error fetching activities on page ${page}: ${response.status}`);
-      error(await response.text());
-      exit(1);
-    }
+      if (response.status === 429) {
+        const retryAfter = response.headers.get("Retry-After");
+        const baseWaitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
+        const waitTime = baseWaitTime + retryCount * 30000;
+        warning(
+          `Rate limited. Waiting ${waitTime / 1000}s (retry ${retryCount + 1}/${maxRetries})...`,
+        );
+        await sleep(waitTime);
+        retryCount++;
+        continue;
+      }
 
-    const data = (await response.json()) as ActivitiesResponse;
+      if (!response.ok) {
+        error(`Error fetching activities on page ${page}: ${response.status}`);
+        error(await response.text());
+        exit(1);
+      }
 
-    if (data.errors) {
-      error(`GraphQL errors: ${JSON.stringify(data.errors)}`);
-      exit(1);
-    }
+      const data = (await response.json()) as ActivitiesResponse;
 
-    if (!data.data?.Page) {
-      error("No page data returned from API");
-      exit(1);
-    }
+      if (data.errors) {
+        error(`GraphQL errors: ${JSON.stringify(data.errors)}`);
+        exit(1);
+      }
 
-    const pageActivities = data.data.Page.activities;
-    hasNextPage = data.data.Page.pageInfo.hasNextPage;
+      if (!data.data?.Page) {
+        error("No page data returned from API");
+        exit(1);
+      }
 
-    for (const activity of pageActivities) {
-      if (activity.type === "MANGA_LIST") {
-        allActivities.push(activity);
-      } else if (activity.type === "TEXT") {
-        const text = activity.text.toLowerCase();
-        const mangaKeywords = [
-          "manga",
-          "chapter",
-          "volume",
-          "read",
-          "reading",
-          "manhwa",
-          "manhua",
-          "webtoon",
-          "light novel",
-          "ln",
-        ];
-        if (mangaKeywords.some((keyword) => text.includes(keyword))) {
+      const pageActivities = data.data.Page.activities;
+      hasNextPage = data.data.Page.pageInfo.hasNextPage;
+
+      for (const activity of pageActivities) {
+        if (activity.type === "MANGA_LIST") {
           allActivities.push(activity);
+        } else if (activity.type === "TEXT") {
+          const text = activity.text.toLowerCase();
+          const mangaKeywords = [
+            "manga",
+            "chapter",
+            "volume",
+            "read",
+            "reading",
+            "manhwa",
+            "manhua",
+            "webtoon",
+            "light novel",
+            "ln",
+          ];
+          if (mangaKeywords.some((keyword) => text.includes(keyword))) {
+            allActivities.push(activity);
+          }
         }
       }
+
+      info(
+        `Fetched page ${page}: ${pageActivities.length} activities (${allActivities.length} manga-related total)`,
+      );
+      success = true;
     }
 
-    info(
-      `Fetched page ${page}: ${pageActivities.length} activities (${allActivities.length} manga-related total)`,
-    );
-    page++;
+    if (!success) {
+      error(
+        `Failed to fetch page ${page} after ${maxRetries} retries due to rate limiting`,
+      );
+      exit(1);
+    }
 
-    await sleep(500);
+    page++;
+    await sleep(3000);
   }
 
   return allActivities;
@@ -473,23 +482,11 @@ async function deleteActivity(
     id: activityId,
   };
 
-  let response = await fetch(API_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify({ query: mutation, variables }),
-  });
+  const maxRetries = 3;
+  let retryCount = 0;
 
-  if (response.status === 429) {
-    const retryAfter = response.headers.get("Retry-After");
-    const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
-    warning(`Rate limited. Waiting ${waitTime / 1000}s...`);
-    await sleep(waitTime);
-
-    response = await fetch(API_URL, {
+  while (retryCount < maxRetries) {
+    const response = await fetch(API_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -498,24 +495,41 @@ async function deleteActivity(
       },
       body: JSON.stringify({ query: mutation, variables }),
     });
+
+    if (response.status === 429) {
+      const retryAfter = response.headers.get("Retry-After");
+      const baseWaitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
+      const waitTime = baseWaitTime + retryCount * 30000;
+      warning(
+        `Rate limited. Waiting ${waitTime / 1000}s (retry ${retryCount + 1}/${maxRetries})...`,
+      );
+      await sleep(waitTime);
+      retryCount++;
+      continue;
+    }
+
+    if (!response.ok) {
+      error(`Error deleting activity ${activityId}: ${response.status}`);
+      error(await response.text());
+      return false;
+    }
+
+    const data = (await response.json()) as DeleteActivityResponse;
+
+    if (data.errors) {
+      error(
+        `GraphQL errors for activity ${activityId}: ${JSON.stringify(data.errors)}`,
+      );
+      return false;
+    }
+
+    return true;
   }
 
-  if (!response.ok) {
-    error(`Error deleting activity ${activityId}: ${response.status}`);
-    error(await response.text());
-    return false;
-  }
-
-  const data = (await response.json()) as DeleteActivityResponse;
-
-  if (data.errors) {
-    error(
-      `GraphQL errors for activity ${activityId}: ${JSON.stringify(data.errors)}`,
-    );
-    return false;
-  }
-
-  return true;
+  error(
+    `Failed to delete activity ${activityId} after ${maxRetries} retries due to rate limiting`,
+  );
+  return false;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -648,7 +662,7 @@ async function deleteActivities(
       writeln(`${RED}✗${NC}`);
     }
 
-    await sleep(2500);
+    await sleep(3000);
   }
 
   return { deletedCount, failedCount };
