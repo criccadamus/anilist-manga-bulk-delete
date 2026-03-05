@@ -65,10 +65,10 @@ function writeErrorLine(message: string): void {
 }
 
 // Logging functions
-const info = (msg: string) => writeln(`${BLUE}❖${NC} ${msg}`);
-const success = (msg: string) => writeln(`${GREEN}✓${NC} ${msg}`);
-const warning = (msg: string) => writeln(`${YELLOW}⚠${NC} ${msg}`);
-const error = (msg: string) => writeErrorLine(`${RED}✗${NC} ${msg}`);
+const info = (msg: string) => writeln(`${BLUE}❖${NC} ${msg}\n`);
+const success = (msg: string) => writeln(`${GREEN}✓${NC} ${msg}\n`);
+const warning = (msg: string) => writeln(`${YELLOW}⚠${NC} ${msg}\n`);
+const error = (msg: string) => writeErrorLine(`${RED}✗${NC} ${msg}\n`);
 
 interface MediaTitle {
   romaji: string | null;
@@ -193,35 +193,55 @@ async function getMangaList(
     type: "MANGA",
   };
 
-  const response = await fetch(API_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify({ query, variables }),
-  });
+  const maxRetries = 3;
+  let retryCount = 0;
 
-  if (!response.ok) {
-    error(`Error fetching manga list: ${response.status}`);
-    error(await response.text());
-    exit(1);
+  while (retryCount < maxRetries) {
+    const response = await fetch(API_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ query, variables }),
+    });
+
+    if (response.status === 429) {
+      const retryAfter = response.headers.get("Retry-After");
+      const baseWaitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
+      const waitTime = baseWaitTime + retryCount * 30000;
+      warning(
+        `Rate limited. Waiting ${waitTime / 1000}s (retry ${retryCount + 1}/${maxRetries})...`,
+      );
+      await sleep(waitTime);
+      retryCount++;
+      continue;
+    }
+
+    if (!response.ok) {
+      error(`Error fetching manga list: ${response.status}`);
+      error(await response.text());
+      exit(1);
+    }
+
+    const data = (await response.json()) as MediaListCollectionResponse;
+
+    if (data.errors) {
+      error(`GraphQL errors: ${JSON.stringify(data.errors)}`);
+      exit(1);
+    }
+
+    if (!data.data?.MediaListCollection) {
+      error("No data returned from API");
+      exit(1);
+    }
+
+    return data.data.MediaListCollection.lists;
   }
 
-  const data = (await response.json()) as MediaListCollectionResponse;
-
-  if (data.errors) {
-    error(`GraphQL errors: ${JSON.stringify(data.errors)}`);
-    exit(1);
-  }
-
-  if (!data.data?.MediaListCollection) {
-    error("No data returned from API");
-    exit(1);
-  }
-
-  return data.data.MediaListCollection.lists;
+  error("Failed to fetch manga list after maximum retries");
+  exit(1);
 }
 
 async function deleteEntry(
@@ -469,7 +489,7 @@ async function getMangaActivities(
 async function deleteActivity(
   accessToken: string,
   activityId: number,
-): Promise<boolean> {
+): Promise<{ success: boolean; alreadyDeleted: boolean }> {
   const mutation = `
     mutation ($id: Int) {
       DeleteActivity(id: $id) {
@@ -508,28 +528,31 @@ async function deleteActivity(
       continue;
     }
 
+    if (response.status === 400) {
+      const data = (await response.json()) as DeleteActivityResponse;
+      if (
+        data.errors &&
+        JSON.stringify(data.errors).includes("The selected id is invalid")
+      ) {
+        return { success: true, alreadyDeleted: true };
+      }
+      return { success: false, alreadyDeleted: false };
+    }
+
     if (!response.ok) {
-      error(`Error deleting activity ${activityId}: ${response.status}`);
-      error(await response.text());
-      return false;
+      return { success: false, alreadyDeleted: false };
     }
 
     const data = (await response.json()) as DeleteActivityResponse;
 
     if (data.errors) {
-      error(
-        `GraphQL errors for activity ${activityId}: ${JSON.stringify(data.errors)}`,
-      );
-      return false;
+      return { success: false, alreadyDeleted: false };
     }
 
-    return true;
+    return { success: true, alreadyDeleted: false };
   }
 
-  error(
-    `Failed to delete activity ${activityId} after ${maxRetries} retries due to rate limiting`,
-  );
-  return false;
+  return { success: false, alreadyDeleted: false };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -642,30 +665,38 @@ function getActivityDescription(activity: Activity): string {
 async function deleteActivities(
   accessToken: string,
   activities: Activity[],
-): Promise<{ deletedCount: number; failedCount: number }> {
+): Promise<{ deletedCount: number; failedCount: number; skippedCount: number }> {
   let deletedCount = 0;
   let failedCount = 0;
-  let index = 1;
+  let skippedCount = 0;
 
-  for (const activity of activities) {
+  for (let i = 0; i < activities.length; i++) {
+    const activity = activities[i]!;
     const activityId = activity.id;
     const description = getActivityDescription(activity);
-    stdout.write(
-      `[${index++}/${activities.length}] Deleting activity: ${description} (ID: ${activityId})... `,
-    );
+    const progress = `[${i + 1}/${activities.length}]`;
+    
+    stdout.write(`${progress} ${description.substring(0, 60)}... `);
 
-    if (await deleteActivity(accessToken, activityId)) {
-      deletedCount++;
-      writeln(`${GREEN}✓${NC}`);
+    const result = await deleteActivity(accessToken, activityId);
+
+    if (result.success) {
+      if (result.alreadyDeleted) {
+        skippedCount++;
+        writeln(`${YELLOW}⊘${NC} (already deleted)\n`);
+      } else {
+        deletedCount++;
+        writeln(`${GREEN}✓${NC}\n`);
+      }
     } else {
       failedCount++;
-      writeln(`${RED}✗${NC}`);
+      writeln(`${RED}✗${NC}\n`);
     }
 
     await sleep(3000);
   }
 
-  return { deletedCount, failedCount };
+  return { deletedCount, failedCount, skippedCount };
 }
 
 function printSummary(
@@ -673,14 +704,20 @@ function printSummary(
   failedEntries: number,
   deletedActivities: number,
   failedActivities: number,
+  skippedActivities: number,
 ): void {
   writeln(String("=".repeat(50)));
   success("Deletion complete!");
-  writeln(`List entries deleted: ${GREEN}${deletedEntries}${NC}`);
-  if (failedEntries > 0) {
-    writeln(`List entries failed: ${RED}${failedEntries}${NC}`);
+  if (deletedEntries > 0 || failedEntries > 0) {
+    writeln(`List entries deleted: ${GREEN}${deletedEntries}${NC}`);
+    if (failedEntries > 0) {
+      writeln(`List entries failed: ${RED}${failedEntries}${NC}`);
+    }
   }
   writeln(`Activities deleted: ${GREEN}${deletedActivities}${NC}`);
+  if (skippedActivities > 0) {
+    writeln(`Activities already deleted: ${YELLOW}${skippedActivities}${NC}`);
+  }
   if (failedActivities > 0) {
     writeln(`Activities failed: ${RED}${failedActivities}${NC}`);
   }
@@ -728,6 +765,7 @@ async function main(): Promise<void> {
 
   let deletedActivities = 0;
   let failedActivities = 0;
+  let skippedActivities = 0;
 
   if (activities.length > 0) {
     info(`Total manga-related activities to delete: ${activities.length}`);
@@ -741,13 +779,14 @@ async function main(): Promise<void> {
       const result = await deleteActivities(accessToken, activities);
       deletedActivities = result.deletedCount;
       failedActivities = result.failedCount;
+      skippedActivities = result.skippedCount;
     }
   } else {
     warning("No manga-related activities found.");
   }
 
   if (allEntries.length > 0 || activities.length > 0) {
-    printSummary(deletedEntries, failedEntries, deletedActivities, failedActivities);
+    printSummary(deletedEntries, failedEntries, deletedActivities, failedActivities, skippedActivities);
   }
 }
 
