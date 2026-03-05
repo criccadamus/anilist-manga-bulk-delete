@@ -31,7 +31,7 @@ To use this script, you need to obtain an access token from Anilist:
    ```
 6. Authorize the application
 7. You'll be redirected to a page with your access token in the URL
-8. Copy the access token (it's the long string after `access_token=`)
+8. Copy the access token
 
 ## Usage
 

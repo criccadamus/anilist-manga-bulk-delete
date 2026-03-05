@@ -1,6 +1,6 @@
 {
   "name": "anilist-bulk-editor",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "description": "Delete all manga activity from your Anilist account",
   "keywords": [
