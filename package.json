@@ -1,8 +1,8 @@
 {
   "name": "anilist-bulk-editor",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "Delete all manga entries from your Anilist account",
+  "description": "Delete all manga activity from your Anilist account",
   "keywords": [
     "anilist",
     "bulk-delete",
@@ -18,10 +18,10 @@
   },
   "devDependencies": {
     "@types/bun": "^1.3.10",
-    "@typescript/native-preview": "^7.0.0-dev.20260305.1",
-    "oxfmt": "^0.28.0",
-    "oxlint": "^1.51.0",
-    "oxlint-tsgolint": "^0.11.5",
-    "typescript": "^5.9.3"
+    "@typescript/native-preview": "7.0.0-dev.20260305.1",
+    "oxfmt": "0.36.0",
+    "oxlint": "1.51.0",
+    "oxlint-tsgolint": "0.16.0",
+    "typescript": "5.9.3"
   }
 }
