@@ -15,7 +15,35 @@ const RED = "\x1b[0;31m";
 const GREEN = "\x1b[0;32m";
 const YELLOW = "\x1b[1;33m";
 const BLUE = "\x1b[0;34m";
+const CYAN = "\x1b[0;36m";
 const NC = "\x1b[0m";
+
+// Abort controller for graceful cancellation
+let shouldAbort = false;
+
+function setupAbortHandler(): void {
+  if (stdin.isTTY) {
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding("utf8");
+    
+    stdin.on("data", (key: string) => {
+      if (key === "\u001b") {
+        if (!shouldAbort) {
+          shouldAbort = true;
+          writeln(`\n${CYAN}⏸${NC} Abort requested - finishing current operation, then stopping...\n`);
+        }
+      } else if (key === "\u0003") {
+        writeln(`\n${RED}✗${NC} Force quit\n`);
+        exit(1);
+      }
+    });
+  }
+}
+
+function checkAbort(): boolean {
+  return shouldAbort;
+}
 
 const HELP_TEXT = `
 ${BLUE}#${NC} Anilist Bulk Manga Deleter
@@ -48,6 +76,11 @@ ${YELLOW}## What This Script Does${NC}
 2. ${GREEN}Deletes manga activities${NC}: Removes manga-related posts from your activity feed:
    - List activities (e.g., "read chapter X", "completed", "dropped")
    - Text posts containing manga-related keywords (manga, chapter, volume, etc.)
+
+${YELLOW}## Controls${NC}
+
+- Press ${CYAN}ESC${NC} to abort - finishes current operation then stops
+- Press ${RED}Ctrl+C${NC} to force quit immediately
 
 ${YELLOW}## Usage${NC}
 
@@ -623,12 +656,17 @@ function getMediaTitle(entry: MediaListEntry): string {
 async function deleteEntries(
   accessToken: string,
   entries: MediaListEntry[],
-): Promise<{ deletedCount: number; failedCount: number }> {
+): Promise<{ deletedCount: number; failedCount: number; aborted: boolean }> {
   let deletedCount = 0;
   let failedCount = 0;
   let index = 1;
 
   for (const entry of entries) {
+    if (checkAbort()) {
+      warning(`Aborted - ${entries.length - index + 1} entries remaining`);
+      return { deletedCount, failedCount, aborted: true };
+    }
+
     const entryId = entry.id;
     const title = getMediaTitle(entry);
     stdout.write(
@@ -646,7 +684,7 @@ async function deleteEntries(
     await sleep(2500);
   }
 
-  return { deletedCount, failedCount };
+  return { deletedCount, failedCount, aborted: false };
 }
 
 function getActivityDescription(activity: Activity): string {
@@ -665,12 +703,17 @@ function getActivityDescription(activity: Activity): string {
 async function deleteActivities(
   accessToken: string,
   activities: Activity[],
-): Promise<{ deletedCount: number; failedCount: number; skippedCount: number }> {
+): Promise<{ deletedCount: number; failedCount: number; skippedCount: number; aborted: boolean }> {
   let deletedCount = 0;
   let failedCount = 0;
   let skippedCount = 0;
 
   for (let i = 0; i < activities.length; i++) {
+    if (checkAbort()) {
+      warning(`Aborted - ${activities.length - i} activities remaining`);
+      return { deletedCount, failedCount, skippedCount, aborted: true };
+    }
+
     const activity = activities[i]!;
     const activityId = activity.id;
     const description = getActivityDescription(activity);
@@ -696,7 +739,7 @@ async function deleteActivities(
     await sleep(3000);
   }
 
-  return { deletedCount, failedCount, skippedCount };
+  return { deletedCount, failedCount, skippedCount, aborted: false };
 }
 
 function printSummary(
@@ -725,6 +768,8 @@ function printSummary(
 }
 
 async function main(): Promise<void> {
+  setupAbortHandler();
+  
   const args = argv.slice(2);
   if (args[0] === "--help" || args[0] === "-h") {
     showHelp();
@@ -742,51 +787,63 @@ async function main(): Promise<void> {
 
   let deletedEntries = 0;
   let failedEntries = 0;
+  let deletedActivities = 0;
+  let failedActivities = 0;
+  let skippedActivities = 0;
 
   if (allEntries.length > 0) {
-    info(`Total manga entries to delete: ${allEntries.length}`);
-    const confirmedEntries = await confirm(
-      `\n${YELLOW}Are you sure you want to delete ALL manga list entries?${NC} ${BLUE}(yes/no)${NC}: `,
-    );
-    if (!confirmedEntries) {
-      warning("List entry deletion cancelled.");
+    if (checkAbort()) {
+      warning("Aborted before entry deletion");
     } else {
-      info("Starting list entry deletion...");
-      const result = await deleteEntries(accessToken, allEntries);
-      deletedEntries = result.deletedCount;
-      failedEntries = result.failedCount;
+      info(`Total manga entries to delete: ${allEntries.length}`);
+      const confirmedEntries = await confirm(
+        `\n${YELLOW}Are you sure you want to delete ALL manga list entries?${NC} ${BLUE}(yes/no)${NC}: `,
+      );
+      if (!confirmedEntries) {
+        warning("List entry deletion cancelled.");
+      } else {
+        info("Starting list entry deletion...");
+        const result = await deleteEntries(accessToken, allEntries);
+        deletedEntries = result.deletedCount;
+        failedEntries = result.failedCount;
+      }
     }
   } else {
     warning("No manga entries found.");
   }
 
-  info("Fetching manga-related activities...");
-  const activities = await getMangaActivities(accessToken, userId);
-
-  let deletedActivities = 0;
-  let failedActivities = 0;
-  let skippedActivities = 0;
-
-  if (activities.length > 0) {
-    info(`Total manga-related activities to delete: ${activities.length}`);
-    const confirmedActivities = await confirm(
-      `\n${YELLOW}Are you sure you want to delete ALL manga-related activities?${NC} ${BLUE}(yes/no)${NC}: `,
-    );
-    if (!confirmedActivities) {
-      warning("Activity deletion cancelled.");
-    } else {
-      info("Starting activity deletion...");
-      const result = await deleteActivities(accessToken, activities);
-      deletedActivities = result.deletedCount;
-      failedActivities = result.failedCount;
-      skippedActivities = result.skippedCount;
-    }
+  if (checkAbort()) {
+    warning("Aborted before activity deletion");
   } else {
-    warning("No manga-related activities found.");
+    info("Fetching manga-related activities...");
+    const activities = await getMangaActivities(accessToken, userId);
+
+    if (activities.length > 0) {
+      info(`Total manga-related activities to delete: ${activities.length}`);
+      const confirmedActivities = await confirm(
+        `\n${YELLOW}Are you sure you want to delete ALL manga-related activities?${NC} ${BLUE}(yes/no)${NC}: `,
+      );
+      if (!confirmedActivities) {
+        warning("Activity deletion cancelled.");
+      } else {
+        info("Starting activity deletion...");
+        const result = await deleteActivities(accessToken, activities);
+        deletedActivities = result.deletedCount;
+        failedActivities = result.failedCount;
+        skippedActivities = result.skippedCount;
+      }
+    } else {
+      warning("No manga-related activities found.");
+    }
   }
 
-  if (allEntries.length > 0 || activities.length > 0) {
+  if (allEntries.length > 0 || deletedActivities > 0 || failedActivities > 0 || skippedActivities > 0) {
     printSummary(deletedEntries, failedEntries, deletedActivities, failedActivities, skippedActivities);
+  }
+
+  if (stdin.isTTY) {
+    stdin.setRawMode(false);
+    stdin.pause();
   }
 }
 
