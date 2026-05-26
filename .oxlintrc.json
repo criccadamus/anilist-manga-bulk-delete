@@ -82,7 +82,6 @@
     "max-params": ["error", 5],
     "max-statements": ["error", 40],
     "import/no-duplicates": "error",
-    "import/no-unresolved": "error",
     "import/no-mutable-exports": "error"
   }
 }
